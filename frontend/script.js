@@ -4,7 +4,7 @@ async function generateStoryboard() {
     storyboardDiv.innerHTML = "Generating...";
 
     try {
-        const response = await fetch("https://storyboard-backend.onrender.com/generate", {
+        const response = await fetch("https://ai-storyboard-generator.onrender.com/generate", {
             method: "POST",
             body: JSON.stringify({ script }),
             headers: { "Content-Type": "application/json" }
