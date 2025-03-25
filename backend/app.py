@@ -1,36 +1,46 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from diffusers import StableDiffusionPipeline
-import torch
+import requests
+import time
 import os
 
-app = Flask(__name__, static_folder="static")
-CORS(app)  # Enable CORS to allow Netlify frontend to connect
+app = Flask(__name__)
+CORS(app)  # Enable CORS for Netlify frontend
 
-# Load Stable Diffusion model (requires GPU or cloud hosting)
-model_id = "runwayml/stable-diffusion-v1-5"
-pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16)
-pipe = pipe.to("cuda")  # Use GPU if available
+REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")  # Get token from environment variable
+
+def generate_image(prompt):
+    response = requests.post(
+        "https://api.replicate.com/v1/predictions",
+        headers={"Authorization": f"Token {REPLICATE_API_TOKEN}"},
+        json={
+            "version": "stability-ai/stable-diffusion:db21e45d3f7023abc2a46ee38a23973f6dce16bb082a930b0c49861f96d1e5",
+            "input": {"prompt": prompt}
+        }
+    )
+    data = response.json()
+    prediction_url = data["urls"]["get"]
+    while True:
+        result = requests.get(prediction_url, headers={"Authorization": f"Token {REPLICATE_API_TOKEN}"})
+        result_data = result.json()
+        if result_data["status"] == "succeeded":
+            return result_data["output"][0]  # URL of the generated image
+        elif result_data["status"] == "failed":
+            raise Exception("Image generation failed")
+        time.sleep(2)
 
 @app.route("/generate", methods=["POST"])
 def generate():
     script = request.json.get("script", "")
-    prompts = script.split(".")  # Split into scenes
+    prompts = script.split(".")
     image_urls = []
 
-    # Ensure static directory exists
-    if not os.path.exists("static"):
-        os.makedirs("static")
-
-    for i, prompt in enumerate(prompts):
+    for prompt in prompts:
         if prompt.strip():
-            image = pipe(prompt.strip(), num_inference_steps=50).images[0]
-            image_path = f"static/scene_{i}.png"
-            image.save(image_path)
-            # Return the URL relative to the backend
-            image_urls.append(f"/{image_path}")
+            image_url = generate_image(prompt.strip())
+            image_urls.append(image_url)
 
     return jsonify({"images": image_urls})
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
